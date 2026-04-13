@@ -6,7 +6,9 @@ export LD_LIBRARY_PATH=
 RECORD_IFS="$IFS"
 
 function unset_env_config_rk() {
+# mktemp创建临时变量
 	local tmp_file=$(mktemp)
+# 列出当前环境中的所有环境变量
 	env | grep -oh "^RK_.*=" >$tmp_file || true
 	source $tmp_file
 	rm -f $tmp_file
@@ -37,17 +39,21 @@ WIFI_CONF=${SDK_APP_DIR}/wifi_app/wpa_supplicant.conf
 BUILDROOT_PATH=${SDK_SYSDRV_DIR}/source/buildroot/buildroot-2023.02.6
 BUILDROOT_CONFIG_FILE=${BUILDROOT_PATH}/.config
 SDK_CONFIG_DIR=${SDK_ROOT_DIR}/config
+# 别的目录软连接过来
 DTS_CONFIG=${SDK_CONFIG_DIR}/dts_config
 KERNEL_DEFCONFIG=${SDK_CONFIG_DIR}/kernel_defconfig
 BUILDROOT_DEFCONFIG=${SDK_CONFIG_DIR}/buildroot_defconfig
+# kernel和uboot路径
 KERNEL_PATH=${SDK_SYSDRV_DIR}/source/kernel
 UBOOT_PATH=${SDK_SYSDRV_DIR}/source/uboot/u-boot
 #for custom rootfs
 CUSTOM_ROOT=${SDK_ROOT_DIR}/custom_root
 
+# 获取当前的cpu核心数，并设置RK_JOBS为核心数的一半+1
 export RK_JOBS=$(($(getconf _NPROCESSORS_ONLN) / 2 + 1))
 export RK_BUILD_VERSION_TYPE=RELEASE
 
+# 导出环境变量，确保其他脚本或者子进程也能访问到
 export SDK_ROOT_DIR=$SDK_ROOT_DIR
 export RK_PROJECT_OUTPUT=$SDK_ROOT_DIR/output/out
 export RK_PROJECT_TOP_DIR=$PROJECT_TOP_DIR
@@ -63,7 +69,9 @@ export RK_PROJECT_PATH_RAMDISK_TINY_ROOTFS=$RK_PROJECT_PATH_RAMDISK/tiny_rootfs
 
 export PATH=$RK_PROJECT_PATH_PC_TOOLS:$PATH
 
+# rootfs挂载脚本路径
 export RK_PROJECT_FILE_ROOTFS_SCRIPT=$RK_PROJECT_OUTPUT/S20linkmount
+# oem 挂载脚本路径
 export RK_PROJECT_FILE_OEM_SCRIPT=$RK_PROJECT_OUTPUT/S21appinit
 export RK_PROJECT_FILE_RECOVERY_SCRIPT=$RK_PROJECT_PATH_RAMDISK_TINY_ROOTFS/etc/init.d/S15linkmount_recovery
 export RK_PROJECT_FILE_RECOVERY_LUNCH_SCRIPT=$RK_PROJECT_PATH_RAMDISK_TINY_ROOTFS/etc/init.d/S99lunch_recovery
@@ -85,6 +93,7 @@ ENV_OFFSET=""
 ################################################################################
 # Public Configure
 ################################################################################
+# 终端颜色定义
 C_BLACK="\e[30;1m"
 C_RED="\e[31;1m"
 C_GREEN="\e[32;1m"
@@ -108,10 +117,12 @@ function msg_error() {
 }
 
 err_handler() {
+# 将上一个命令的退出状态存储在变量ret中
 	ret=$?
 	[ "$ret" -eq 0 ] && return
-
+# 打印调用err_handler的函数名称， ${FUNCNAME[0]}是当前函数，${FUNCNAME[1]}是调用err_handler的函数
 	msg_error "Running ${FUNCNAME[1]} failed!"
+# BASH_LINENO[0]是发生错误的行号，BASH_COMMAND是导致错误的命令
 	msg_error "exit code $ret from line ${BASH_LINENO[0]}:"
 	msg_info "    $BASH_COMMAND"
 	exit $ret
@@ -124,20 +135,24 @@ function finish_build() {
 
 function check_config() {
 	unset missing
+# 表示传入的参数列表中的每个变量
 	for var in $@; do
+# 使用eval检查变量是否已经设置
 		eval [ \$$var ] && continue
-
+# 如果没有设置，就添加到missing中
 		missing="$missing $var"
 	done
-
+#检查missing是否为空，如果为空，表示所有变量都已设置，返回0
 	[ -z "$missing" ] && return 0
-
+# 否则，打印缺失的变量，并返回1
 	msg_info "Skipping ${FUNCNAME[1]} for missing configs: $missing."
 	return 1
 }
 
 function __IS_IN_ARRAY() {
+# 将第一个参数作为要查找的值，剩下的参数作为数组
 	local value="$1"
+# 移动参数位置，$@现在只包含数组元素
 	shift
 	for item in "$@"; do
 		if [[ "$item" == "$value" ]]; then
@@ -407,8 +422,9 @@ function usagesysdrv() {
 }
 
 function usagekernel() {
+# 检查dts是否在rk_kernel_defconfig配置中设置
 	check_config RK_KERNEL_DTS RK_KERNEL_DEFCONFIG || return 0
-
+#构建内核
 	echo -e "make kernel -C ${SDK_SYSDRV_DIR} ${_FDS} \
 		KERNEL_CFG=${RK_KERNEL_DEFCONFIG} ${_FDS} \
 		KERNEL_DTS=${RK_KERNEL_DTS} ${_FDS} \
@@ -530,8 +546,10 @@ function build_check_power_domain() {
 
 	dump_kernel_dtb_file=${kernel_file_dtb_dts}.dump.dts
 
+# 编译dtb为dts
 	dtc -I dtb -O dts -o ${dump_kernel_dtb_file} ${kernel_file_dtb_dts}.dtb 2>/dev/null
 	tmp_grep_file=$(mktemp)
+# 搜索dump_kernel_dtb_file中是否有io-domains节点， 如果有就写入tmp_grep_file
 	if ! grep -Pzo "io-domains\s*{(\n|\w|-|;|=|<|>|\"|_|\s|,)*};" $dump_kernel_dtb_file 1>$tmp_grep_file 2>/dev/null; then
 		rm -f $dump_kernel_dtb_file
 		rm -f $tmp_grep_file
@@ -541,8 +559,10 @@ function build_check_power_domain() {
 	tmp_io_domain_file=$(mktemp)
 	tmp_final_target=$(mktemp)
 	tmp_phandle_file=$(mktemp)
+# 搜索tmp_grep_file中包含supply的行，写入tmp_io_domain_file
 	grep -a supply $tmp_grep_file >$tmp_io_domain_file
 	rm -f $tmp_grep_file
+# 从tmp_io_domain_file中提取第三列（phandle值），并格式化为"phandle = value"的形式，写入tmp_phandle_file
 	awk '{print "phandle = " $3}' $tmp_io_domain_file >$tmp_phandle_file
 
 	while IFS= read -r item_phandle && IFS= read -u 3 -r item_domain; do
@@ -607,6 +627,7 @@ function build_check() {
 		dst=${chk_item%%,*}
 		src=${chk_item##*,}
 		echo "**************************************"
+# 检查dst命令是否可以成功执行
 		if eval $dst &>/dev/null; then
 			echo "Check [OK]: $dst"
 		else
@@ -641,6 +662,7 @@ EOF
 	echo "TARGET_APP_CONFIG=$RK_APP_DEFCONFIG $RK_APP_DEFCONFIG_FRAGMENT $RK_APP_TYPE"
 	echo "========================================="
 
+# 调用build_meta,执行导出操作，将元数据头文件导出到指定的媒体目录
 	build_meta --export --media_dir $RK_PROJECT_PATH_MEDIA # export meta header files
 	#build_meta --export --media_dir $RK_PROJECT_PATH_MEDIA # for rtl8723bs
 	test -d ${SDK_APP_DIR} && make -C ${SDK_APP_DIR}
@@ -724,7 +746,7 @@ function build_uboot() {
 			exit 1
 		fi
 	fi
-
+# 切换到sysdrv目录，执行make uboot命令，传递配置参数
 	make uboot -C ${SDK_SYSDRV_DIR} UBOOT_CFG=${RK_UBOOT_DEFCONFIG} UBOOT_CFG_FRAGMENT=${RK_UBOOT_DEFCONFIG_FRAGMENT} SYSDRV_UBOOT_RKBIN_OVERLAY_INI=$uboot_rkbin_ini
 
 	finish_build
@@ -805,8 +827,8 @@ function build_sysdrv() {
 	if ! [ -d $RK_PROJECT_OUTPUT ]; then
 		mkdir -p $RK_PROJECT_OUTPUT
 	fi
-
-	if [ -f $rootfs_tarball ]; then
+      
+	if [ -f $rootfs_tarball ]; then 
 		if [ -d $rootfs_out_dir ]; then
 			rm -rf $rootfs_out_dir
 		fi
@@ -815,6 +837,9 @@ function build_sysdrv() {
 		msg_error "Not found rootfs tarball: $rootfs_tarball"
 		exit 1
 	fi
+
+	# build usr_package(main) and copy to rootfs
+	build_usr_package
 
 	msg_info "If you need to add custom files, please upload them to <Luckfox Sdk>/output/out/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}."
 	finish_build
@@ -844,6 +869,30 @@ function build_kernel() {
 	finish_build
 }
 
+# Function to build usr_package and copy main to rootfs
+function build_usr_package() {
+    echo "Building usr_package..."
+    local USR_PACKAGE_DIR="$SDK_ROOT_DIR/usr_package"
+    local MAIN_OUTPUT_DIR="$USR_PACKAGE_DIR/install/bin"
+# move main to rootfs( outluckfox-pico/output/out/rootfs_uclibc_rv1106/usr/bin)
+    local ROOTFS_TARGET_DIR="$RK_PROJECT_OUTPUT/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}/usr/bin"
+
+    if [ -f "$USR_PACKAGE_DIR/build_main.sh" ]; then
+        chmod +x "$USR_PACKAGE_DIR/build_main.sh"
+        (cd "$USR_PACKAGE_DIR" && ./build_main.sh)
+        if [ -f "$MAIN_OUTPUT_DIR/main" ]; then
+            cp "$MAIN_OUTPUT_DIR/main" "$ROOTFS_TARGET_DIR/"
+            echo "main program copied to $ROOTFS_TARGET_DIR."
+        else
+            echo "Error: main program not found in $MAIN_OUTPUT_DIR."
+            exit 1
+        fi
+    else
+        echo "Error: $USR_PACKAGE_DIR/build_main.sh not found."
+        exit 1
+    fi
+}
+
 function build_rootfs() {
 	check_config RK_BOOT_MEDIUM || return 0
 
@@ -869,6 +918,7 @@ function build_rootfs() {
 		exit 1
 	fi
 
+# 自己想放入roottfs的文件，可以放在output/out/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}目录下, 也就是/home/magw/magwlab/luckfox/luckfox-pico/output/out/rootfs_uclibc_rv1106
 	msg_info "If you need to add custom files, please upload them to <Luckfox Sdk>/output/out/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}."
 	finish_build
 }
@@ -1170,7 +1220,8 @@ function build_updateimg() {
 
 	IMAGE_PATH=$RK_PROJECT_OUTPUT_IMAGE
 	PACK_TOOL_PATH=$SDK_ROOT_DIR/tools/linux/Linux_Pack_Firmware
-
+# /home/magw/magwlab/luckfox/luckfox-pico/tools/linux/Linux_Pack_Firmware下
+# 调用mk-update_pack.sh脚本，生成update.img文件
 	# run update.img package script
 	$PACK_TOOL_PATH/mk-update_pack.sh -id $RK_CHIP -i $IMAGE_PATH
 
