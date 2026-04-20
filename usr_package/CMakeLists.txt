@@ -90,6 +90,7 @@ add_executable(main
 target_include_directories(main PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/src/cJSON    # ✅ 添加这行
     ${CMAKE_CURRENT_SOURCE_DIR}/modules
 )
 
