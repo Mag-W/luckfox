@@ -1,0 +1,7 @@
+config FLASH_CDEV
+    tristate "Flash MTD character device driver"
+    depends on MTD
+    help
+      Provides /dev/flash_rw character device for userspace
+      read/write/erase access to MTD flash partitions.
+      Use mtd_index module parameter to select the partition.

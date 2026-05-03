@@ -1,0 +1,1 @@
+obj-$(CONFIG_FLASH_CDEV) += flash_cdev.o
