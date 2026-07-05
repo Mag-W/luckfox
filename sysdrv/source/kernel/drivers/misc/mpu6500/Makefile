@@ -1,0 +1,1 @@
+obj-$(CONFIG_MPU6500) += mpu6500.o

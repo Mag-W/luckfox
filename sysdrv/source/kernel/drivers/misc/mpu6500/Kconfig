@@ -1,0 +1,6 @@
+config MPU6500
+	tristate "Luckfox MPU6500 SPI driver (misc)"
+	depends on SPI
+	help
+	  SPI driver for InvenSense MPU6500 on Luckfox boards.
+	  Creates /dev/mpu6500 character device.

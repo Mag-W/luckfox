@@ -7,6 +7,7 @@ add_library(usr_lib STATIC
     src/module_manager/module_manager.c
     src/log/log.c
     src/cJSON/cJSON.c
+    src/mpu6500/mpu6500.c
 )
 
 # 设置 mbedtls 库的位置
@@ -17,6 +18,7 @@ set(MBEDTLS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/mbedtls/include")
 target_include_directories(usr_lib PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cJSON # ✅ 添加这行，让库内部也能找到 cJSON 的头文件
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/mpu6500
     ${MBEDTLS_INCLUDE_DIR}    # ✅ 添加 mbedtls 头文件路径
 )
 
@@ -24,6 +26,7 @@ target_include_directories(usr_lib PRIVATE
 target_include_directories(usr_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cJSON    # ✅ 添加这行，让外部可以使用 cJSON
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/mpu6500
     ${MBEDTLS_INCLUDE_DIR}    # ✅ 添加 mbedtls 头文件路径
 )
 

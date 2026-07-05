@@ -503,4 +503,5 @@ source "drivers/misc/cardreader/Kconfig"
 source "drivers/misc/habanalabs/Kconfig"
 source "drivers/misc/uacce/Kconfig"
 source "drivers/misc/flash_cdev/Kconfig"
+source "drivers/misc/mpu6500/Kconfig"
 endmenu

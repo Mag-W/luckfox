@@ -92,6 +92,7 @@ target_include_directories(main PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/src/cJSON
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/src/mbedtls/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/src/mpu6500
     ${CMAKE_CURRENT_SOURCE_DIR}/modules
 )
 
