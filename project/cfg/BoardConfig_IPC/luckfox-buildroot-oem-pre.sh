@@ -41,6 +41,16 @@ function remove_data()
 
     # vqefiles
     lf_rm $RK_PROJECT_PACKAGE_OEM_DIR/usr/share/vqefiles/*
+
+
+    /*暂时去掉不需要的进程，这里关闭启动脚本*/
+    INITD_DIR="${SDK_ROOT_DIR}/output/out/rootfs_uclibc_rv1106/etc/init.d"
+
+    [ -f "${INITD_DIR}/S21appinit" ] && mv "${INITD_DIR}/S21appinit" "${INITD_DIR}/K21appinit"
+    [ -f "${INITD_DIR}/S50sshd" ] && mv "${INITD_DIR}/S50sshd" "${INITD_DIR}/K50sshd"
+    [ -f "${INITD_DIR}/S60micinit" ] && mv "${INITD_DIR}/S60micinit" "${INITD_DIR}/K60micinit"
+    [ -f "${INITD_DIR}/S99python" ] && mv "${INITD_DIR}/S99python" "${INITD_DIR}/K99python"
+    [ -f "${INITD_DIR}/S99_auto_reboot" ] && mv "${INITD_DIR}/S99_auto_reboot" "${INITD_DIR}/K99_auto_reboot"
 }
 
 #=========================
