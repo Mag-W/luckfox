@@ -6,6 +6,7 @@ from itertools import count
 
 CMD_ECHO = 1
 CMD_GET_STATUS = 2
+RSP_HEADER_LEN = 10
 
 _req_id_gen = count(1)
 
@@ -31,16 +32,15 @@ def send_request(host: str, port: int, cmd: int, payload: bytes, timeout: float 
     req_id, frame = build_request(cmd, payload)
 
     with socket.create_connection((host, port), timeout=timeout) as sock:
-        sock.settimeout(timeout)
         sock.sendall(frame)
 
         frame_len = struct.unpack("!I", readn(sock, 4))[0]
-        if frame_len < 10:
+        if frame_len < RSP_HEADER_LEN:
             raise RuntimeError(f"bad response frame_len={frame_len}")
 
         body = readn(sock, frame_len)
-        rsp_req_id, rsp_cmd, code, payload_len = struct.unpack("!IHHH", body[:10])
-        rsp_payload = body[10:]
+        rsp_req_id, rsp_cmd, code, payload_len = struct.unpack("!IHHH", body[:RSP_HEADER_LEN])
+        rsp_payload = body[RSP_HEADER_LEN:]
 
         if len(rsp_payload) != payload_len:
             raise RuntimeError(

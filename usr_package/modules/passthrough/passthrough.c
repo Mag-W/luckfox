@@ -22,7 +22,9 @@
 #define PT_BACKLOG               4
 #define PT_IO_TIMEOUT_MS         5000
 #define PT_MAX_PAYLOAD_LEN       2048
-#define PT_MAX_FRAME_LEN         (8 + PT_MAX_PAYLOAD_LEN)
+#define PT_REQ_HEADER_LEN        8
+#define PT_RSP_HEADER_LEN        10
+#define PT_MAX_FRAME_LEN         (PT_REQ_HEADER_LEN + PT_MAX_PAYLOAD_LEN)
 
 #define PT_CODE_OK               0
 #define PT_CODE_BAD_PACKET       400
@@ -51,12 +53,49 @@ typedef struct {
 static volatile int g_running = 0;
 static int g_listen_fd = -1;
 static pthread_t g_server_tid;
+static int g_thread_created = 0;
+static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void close_fd_safe(int *fd) {
-    if (fd && *fd >= 0) {
-        close(*fd);
-        *fd = -1;
-    }
+static void set_running(int running) {
+    pthread_mutex_lock(&g_state_lock);
+    g_running = running;
+    pthread_mutex_unlock(&g_state_lock);
+}
+
+static int is_running(void) {
+    int running;
+    pthread_mutex_lock(&g_state_lock);
+    running = g_running;
+    pthread_mutex_unlock(&g_state_lock);
+    return running;
+}
+
+static void set_thread_created(int created) {
+    pthread_mutex_lock(&g_state_lock);
+    g_thread_created = created;
+    pthread_mutex_unlock(&g_state_lock);
+}
+
+static int is_thread_created(void) {
+    int created;
+    pthread_mutex_lock(&g_state_lock);
+    created = g_thread_created;
+    pthread_mutex_unlock(&g_state_lock);
+    return created;
+}
+
+static int get_listen_fd(void) {
+    int fd;
+    pthread_mutex_lock(&g_state_lock);
+    fd = g_listen_fd;
+    pthread_mutex_unlock(&g_state_lock);
+    return fd;
+}
+
+static void set_listen_fd(int fd) {
+    pthread_mutex_lock(&g_state_lock);
+    g_listen_fd = fd;
+    pthread_mutex_unlock(&g_state_lock);
 }
 
 static int set_socket_timeout(int fd, int timeout_ms) {
@@ -121,6 +160,8 @@ static int writen(int fd, const void *buf, size_t n) {
 
 static uint16_t status_payload(uint8_t *out, uint16_t out_max) {
     time_t now = time(NULL);
+    if (out_max == 0)
+        return 0;
     int n = snprintf((char *)out, out_max,
                      "{\"status\":\"ok\",\"module\":\"passthrough\",\"ts\":%ld}",
                      (long)now);
@@ -140,6 +181,8 @@ static void dispatch_command(const passthrough_request_t *req, passthrough_respo
     switch (req->cmd) {
     case PT_CMD_ECHO:
         resp->payload_len = req->payload_len;
+        if (resp->payload_len > sizeof(resp->payload))
+            resp->payload_len = sizeof(resp->payload);
         if (resp->payload_len > 0)
             memcpy(resp->payload, req->payload, resp->payload_len);
         break;
@@ -147,12 +190,19 @@ static void dispatch_command(const passthrough_request_t *req, passthrough_respo
         resp->payload_len = status_payload(resp->payload, sizeof(resp->payload));
         break;
     default:
+    {
+        int n;
         resp->code = PT_CODE_UNKNOWN_CMD;
-        resp->payload_len = (uint16_t)snprintf((char *)resp->payload, sizeof(resp->payload),
-                                               "unknown cmd: %u", req->cmd);
-        if (resp->payload_len >= sizeof(resp->payload))
-            resp->payload_len = sizeof(resp->payload) - 1;
+        n = snprintf((char *)resp->payload, sizeof(resp->payload), "unknown cmd: %u", req->cmd);
+        if (n < 0) {
+            resp->payload_len = 0;
+        } else if ((size_t)n >= sizeof(resp->payload)) {
+            resp->payload_len = (uint16_t)(sizeof(resp->payload) - 1);
+        } else {
+            resp->payload_len = (uint16_t)n;
+        }
         break;
+    }
     }
 }
 
@@ -163,7 +213,7 @@ static int send_response(int fd, const passthrough_response_t *resp) {
     uint16_t code_n;
     uint16_t payload_len_n;
 
-    uint32_t frame_len = (uint32_t)(10 + resp->payload_len);
+    uint32_t frame_len = (uint32_t)(PT_RSP_HEADER_LEN + resp->payload_len);
     frame_len_n = htonl(frame_len);
     req_id_n = htonl(resp->request_id);
     cmd_n = htons(resp->cmd);
@@ -194,9 +244,14 @@ static int send_error_response(int fd, uint32_t request_id, uint16_t cmd, uint16
     resp.code = code;
 
     if (msg) {
-        resp.payload_len = (uint16_t)snprintf((char *)resp.payload, sizeof(resp.payload), "%s", msg);
-        if (resp.payload_len >= sizeof(resp.payload))
-            resp.payload_len = sizeof(resp.payload) - 1;
+        int n = snprintf((char *)resp.payload, sizeof(resp.payload), "%s", msg);
+        if (n < 0) {
+            resp.payload_len = 0;
+        } else if ((size_t)n >= sizeof(resp.payload)) {
+            resp.payload_len = (uint16_t)(sizeof(resp.payload) - 1);
+        } else {
+            resp.payload_len = (uint16_t)n;
+        }
     }
 
     return send_response(fd, &resp);
@@ -215,7 +270,7 @@ static int handle_passthrough_request(int client_fd) {
         return rc;
 
     frame_len = ntohl(frame_len_n);
-    if (frame_len < 8 || frame_len > PT_MAX_FRAME_LEN) {
+    if (frame_len < PT_REQ_HEADER_LEN || frame_len > sizeof(frame_buf)) {
         LOG_WARN_FMT("passthrough invalid frame_len=%u", frame_len);
         (void)send_error_response(client_fd, 0, 0, PT_CODE_BAD_PACKET, "invalid frame length");
         return -1;
@@ -241,7 +296,7 @@ static int handle_passthrough_request(int client_fd) {
         req.payload_len = ntohs(payload_len_n);
     }
 
-    if ((uint32_t)(8 + req.payload_len) != frame_len || req.payload_len > PT_MAX_PAYLOAD_LEN) {
+    if ((uint32_t)(PT_REQ_HEADER_LEN + req.payload_len) != frame_len) {
         LOG_WARN_FMT("passthrough malformed packet req_id=%u cmd=%u payload_len=%u frame_len=%u",
                      req.request_id, req.cmd, req.payload_len, frame_len);
         (void)send_error_response(client_fd, req.request_id, req.cmd, PT_CODE_BAD_PACKET,
@@ -249,7 +304,7 @@ static int handle_passthrough_request(int client_fd) {
         return -1;
     }
 
-    req.payload = frame_buf + 8;
+    req.payload = frame_buf + PT_REQ_HEADER_LEN;
 
     dispatch_command(&req, &resp);
     if (send_response(client_fd, &resp) != 0) {
@@ -263,13 +318,21 @@ static int handle_passthrough_request(int client_fd) {
 static void *passthrough_server_thread(void *arg) {
     (void)arg;
 
-    while (g_running) {
+    /* Minimal implementation: single-threaded by design, handles one client at a time. */
+    while (is_running()) {
+        char ipbuf[INET_ADDRSTRLEN] = {0};
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
-        int client_fd = accept(g_listen_fd, (struct sockaddr *)&client_addr, &client_len);
+        int listen_fd = get_listen_fd();
+        int client_fd;
+
+        if (listen_fd < 0)
+            break;
+
+        client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len);
 
         if (client_fd < 0) {
-            if (!g_running)
+            if (!is_running())
                 break;
             if (errno == EINTR)
                 continue;
@@ -285,9 +348,10 @@ static void *passthrough_server_thread(void *arg) {
         }
 
         LOG_INFO_FMT("passthrough client connected: %s:%d",
-                     inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                     inet_ntop(AF_INET, &client_addr.sin_addr, ipbuf, sizeof(ipbuf)) ? ipbuf : "unknown",
+                     ntohs(client_addr.sin_port));
 
-        while (g_running) {
+        while (is_running()) {
             int hret = handle_passthrough_request(client_fd);
             if (hret <= 0)
                 break;
@@ -307,64 +371,86 @@ static int passthrough_module_init(void) {
 
 static int passthrough_module_start(void) {
     struct sockaddr_in addr;
+    int listen_fd;
     int on = 1;
 
-    if (g_running)
+    if (is_running())
         return 0;
 
-    g_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (g_listen_fd < 0) {
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0) {
         LOG_ERROR_FMT("passthrough socket create failed: %s", strerror(errno));
         return -1;
     }
-
-    setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
+        LOG_WARN_FMT("passthrough setsockopt SO_REUSEADDR failed: %s", strerror(errno));
+    }
 
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(PT_LISTEN_PORT);
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(g_listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         LOG_ERROR_FMT("passthrough bind %d failed: %s", PT_LISTEN_PORT, strerror(errno));
-        close_fd_safe(&g_listen_fd);
+        close(listen_fd);
+        set_listen_fd(-1);
         return -1;
     }
 
-    if (listen(g_listen_fd, PT_BACKLOG) != 0) {
+    if (listen(listen_fd, PT_BACKLOG) != 0) {
         LOG_ERROR_FMT("passthrough listen failed: %s", strerror(errno));
-        close_fd_safe(&g_listen_fd);
+        close(listen_fd);
+        set_listen_fd(-1);
         return -1;
     }
 
-    g_running = 1;
+    set_listen_fd(listen_fd);
+    set_running(1);
     if (pthread_create(&g_server_tid, NULL, passthrough_server_thread, NULL) != 0) {
         LOG_ERROR_FMT("passthrough thread create failed");
-        g_running = 0;
-        close_fd_safe(&g_listen_fd);
+        set_running(0);
+        close(listen_fd);
+        set_listen_fd(-1);
         return -1;
     }
+    set_thread_created(1);
 
     LOG_INFO_FMT("passthrough server started on port %d", PT_LISTEN_PORT);
     return 0;
 }
 
 static int passthrough_module_stop(void) {
-    if (!g_running)
+    if (!is_running())
         return 0;
 
-    g_running = 0;
-    if (g_listen_fd >= 0)
-        shutdown(g_listen_fd, SHUT_RDWR);
-    close_fd_safe(&g_listen_fd);
-    pthread_join(g_server_tid, NULL);
+    set_running(0);
+    {
+        int listen_fd = get_listen_fd();
+        set_listen_fd(-1);
+        if (listen_fd >= 0) {
+            shutdown(listen_fd, SHUT_RDWR);
+            close(listen_fd);
+        }
+    }
+    {
+        int created;
+        pthread_t tid;
+        pthread_mutex_lock(&g_state_lock);
+        created = g_thread_created;
+        tid = g_server_tid;
+        g_thread_created = 0;
+        pthread_mutex_unlock(&g_state_lock);
+        if (created)
+            pthread_join(tid, NULL);
+    }
 
     LOG_INFO_FMT("passthrough server stopped");
     return 0;
 }
 
 static int passthrough_module_health_check(void) {
-    return g_running ? 0 : -1;
+    return is_running() ? 0 : -1;
 }
 
 static module_t passthrough_module = {
