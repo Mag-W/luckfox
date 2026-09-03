@@ -46,6 +46,15 @@ else()
 endif()
 
 # ============================================
+# video 模块：RV1106 依赖 RKAIQ/ISP 驱动 sensor 出图
+# ============================================
+# 需要检查 CONFIG_MODULE_LIST 是否包含 video，如果包含才开启 ENABLE_RKAIQ
+if(CONFIG_MODULE_LIST MATCHES "video")
+    add_compile_definitions(ENABLE_RKAIQ)
+    message(STATUS "✓ RKAIQ/ISP enabled for video module")
+endif()
+
+# ============================================
 # Build lib
 # ============================================
 # 进入lib子仓库，执行其中的CMakeLists.txt，编译生成静态库libusr_lib.a
@@ -94,11 +103,58 @@ target_include_directories(main PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/src/mbedtls/include
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/src/mpu6500
     ${CMAKE_CURRENT_SOURCE_DIR}/modules
+
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common/rtsp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common/param
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/rockit/rockit/mpi/sdk/include
+    # rtsp_demo.h location
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/common_algorithm/common_algorithm/misc/include
+      # rkaiq release include for RV1106 toolchain
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/uAPI2
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/xcore
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/algos
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/iq_parser
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/iq_parser_v2
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/smartIr
 )
 
+# ---- rkipc param helper lib ----
+add_library(rkipc_param STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common/param/param.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common/param/iniparser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common/param/dictionary.c
+)
+
+target_include_directories(rkipc_param PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/../project/app/rkipc/rkipc/common/param
+)
+
+
 target_link_libraries(main
+    # ---- 基础框架库 ----
     usr_lib
+    rkipc_param
     pthread
+    # ---- RK media 库（video 模块依赖） ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/rockit/rockit/lib/lib32/librockit.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/mpp/release_mpp_rv1106_arm-rockchip830-linux-uclibcgnueabihf/lib/librockchip_mpp.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/common_algorithm/common_algorithm/misc/lib/arm-rockchip830-linux-uclibcgnueabihf/librtsp.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/lib/librkaiq.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/sysutils/out/lib/librksysutils.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/rga/release_rga_rv1106_arm-rockchip830-linux-uclibcgnueabihf/lib/librga.a
+    m
+    dl
+    stdc++
+    # 再次引用 usr_lib，让 rkipc_param 引用的 rkipc_log_level/enable_minilog
+    # 能在静态库链接中被解析（静态库按顺序扫描，需放后面）
+    usr_lib
 )
 
 # 编译
@@ -118,3 +174,6 @@ target_link_libraries(main
 # Installation
 # ============================================
 install(TARGETS main DESTINATION bin)
+# video 模块配置：构建后会出现在 install/etc/video.ini
+# 集成到 rootfs 时拷贝到板子 /etc/video.ini（或 /userdata/rkipc.ini 亦可）
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/config/video.ini DESTINATION etc)

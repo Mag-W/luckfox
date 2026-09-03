@@ -8,6 +8,8 @@ add_library(usr_lib STATIC
     src/log/log.c
     src/cJSON/cJSON.c
     src/mpu6500/mpu6500.c
+    src/http_api/http_api.c
+    src/rkipc/rkipc_log.c
 )
 
 # 设置 mbedtls 库的位置
@@ -20,6 +22,10 @@ target_include_directories(usr_lib PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cJSON # ✅ 添加这行，让库内部也能找到 cJSON 的头文件
     ${CMAKE_CURRENT_SOURCE_DIR}/src/mpu6500
     ${MBEDTLS_INCLUDE_DIR}    # ✅ 添加 mbedtls 头文件路径
+    # RK MPI 头
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/rockit/rockit/mpi/sdk/include
+    # rtsp_demo.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../media/common_algorithm/common_algorithm/misc/include
 )
 
 # ✅ 为外部使用者（main、模块）配置公共头文件路径

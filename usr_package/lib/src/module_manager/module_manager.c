@@ -37,7 +37,9 @@ int module_manager_init_all(void) {
             if (mod->init() != 0) {
                 LOG_ERROR_FMT("Failed to init %s", mod->name);
                 mod->state = MODULE_STATE_ERROR;
-                return -1;
+                /* 单个模块 init 失败不终止其他模块，避免一处坏拖垮整个进程 */
+                idx++;
+                continue;
             }
         }
         
@@ -84,7 +86,9 @@ int module_manager_start_all(void) {
             if (mod->start() != 0) {
                 LOG_ERROR_FMT("Failed to start %s", mod->name);
                 mod->state = MODULE_STATE_ERROR;
-                return -1;
+                /* 单个模块 start 失败不终止其他模块 */
+                idx++;
+                continue;
             }
         }
         

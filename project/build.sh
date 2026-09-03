@@ -876,6 +876,8 @@ function build_usr_package() {
     local MAIN_OUTPUT_DIR="$USR_PACKAGE_DIR/install/bin"
 # move main to rootfs( outluckfox-pico/output/out/rootfs_uclibc_rv1106/usr/bin)
     local ROOTFS_TARGET_DIR="$RK_PROJECT_OUTPUT/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}/usr/bin"
+    local ROOTFS_INIT_DIR="$RK_PROJECT_OUTPUT/rootfs_${RK_LIBC_TPYE}_${RK_CHIP}/etc/init.d"
+    local OEM_SHARE_DIR="$RK_PROJECT_OUTPUT/oem/usr/share"
 
     if [ -f "$USR_PACKAGE_DIR/build_main.sh" ]; then
         chmod +x "$USR_PACKAGE_DIR/build_main.sh"
@@ -883,6 +885,73 @@ function build_usr_package() {
         if [ -f "$MAIN_OUTPUT_DIR/main" ]; then
             cp "$MAIN_OUTPUT_DIR/main" "$ROOTFS_TARGET_DIR/"
             echo "main program copied to $ROOTFS_TARGET_DIR."
+
+            # ---- 部署 camera 默认配置到 oem 分区 ----
+            mkdir -p "$OEM_SHARE_DIR"
+            if [ -f "$USR_PACKAGE_DIR/config/video.ini" ]; then
+                cp -f "$USR_PACKAGE_DIR/config/video.ini" "$OEM_SHARE_DIR/video.ini"
+                echo "video.ini copied to $OEM_SHARE_DIR/video.ini"
+            fi
+
+            # ---- 生成开机自启脚本：insmod 相机驱动 -> 部署配置 -> 后台启动 main ----
+            mkdir -p "$ROOTFS_INIT_DIR"
+            cat > "$ROOTFS_INIT_DIR/S99main" <<'EOF'
+#!/bin/sh
+
+APP=/usr/bin/main
+KO_DIR=/oem/usr/ko
+
+start() {
+    echo "Starting main..."
+
+    # 1. 加载相机/ISP/编码器驱动链 (若尚未加载)
+    if [ -f "$KO_DIR/insmod_ko.sh" ] && ! lsmod | grep -q video_rkisp; then
+        echo "insmod camera drivers..."
+        ( cd "$KO_DIR" && sh insmod_ko.sh ) 2>/dev/null
+    fi
+
+    # 2. 首次运行时把默认 camera 配置写入可写的 /userdata
+    if [ -f "/oem/usr/share/video.ini" ] && [ ! -f "/userdata/video.ini" ]; then
+        cp -f /oem/usr/share/video.ini /userdata/video.ini
+        echo "deployed /userdata/video.ini"
+    fi
+
+    # 3. 等待 ISP/sensor 设备就绪（最多 5 秒）
+    i=0
+    while [ $i -lt 50 ]; do
+        if [ -e /dev/video0 ] || [ -e /proc/rkisp-vir0 ]; then
+            break
+        fi
+        i=$((i + 1))
+        sleep 0.1
+    done
+
+    $APP &
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        echo "Stopping main..."
+        killall main 2>/dev/null
+        ;;
+    restart)
+        $0 stop
+        sleep 1
+        $0 start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
+EOF
+            chmod +x "$ROOTFS_INIT_DIR/S99main"
+            echo "S99main auto-start script installed to $ROOTFS_INIT_DIR"
         else
             echo "Error: main program not found in $MAIN_OUTPUT_DIR."
             exit 1
